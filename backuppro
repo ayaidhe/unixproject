@@ -1,0 +1,131 @@
+#!/bin/bash
+echo -e "\e[91mBienvenue sur le Système de Gestion de Sauvegarde Automatique : \e[1m BACKUP-PRO \e[1m\e[91m\e[0m"
+echo -e "\e[91mOn vous propose un ensemble des étapes guidées pour assurer un bon fonctionnement du Système.\e[0m"
+echo -e "\e[91mCi-dessous les étapes à suivre. Merci !.\e[0m" 
+
+# Fonction pour vérifier si le répertoire source existe
+verifier_repertoire_src() {
+    for dir in "$@"; do
+        if [ ! -d "$dir" ]; then
+            echo "Erreur : Le répertoire '$dir' n'existe pas."
+            echo "Merci de saisir un répertoire valide !"
+            return 1
+        fi
+    done
+}
+
+# Fonction pour vérifier si le répertoire de destination existe, sinon le créer
+verifier_repertoire_dest() {
+    dest="$1"
+    while [ ! -d "$dest" ]; do
+        echo "Erreur : Le répertoire de destination '$dest' n'existe pas."
+        read -p "Veuillez entrer à nouveau le répertoire de destination : " dest
+        mkdir -p "$dest"  # Crée le répertoire s'il n'existe pas
+    done
+}
+
+# Fonction pour effectuer la sauvegarde immédiate
+effectuer_sauvegarde_immediate() {
+    echo "Sauvegarde immédiate en cours..."
+
+    # Créer le répertoire de destination s'il n'existe pas
+    mkdir -p "$destination"
+
+    # Copier les répertoires spécifiés dans le répertoire de destination
+    cp -r "${sources[@]}" "$destination"
+
+    echo "Sauvegarde immédiate terminée !"
+}
+
+# Fonction pour planifier la sauvegarde (cron)
+planifier_sauvegarde_cron() {
+    echo "Sauvegarde programmée avec cron."
+
+    # Demander à l'utilisateur la fréquence de la sauvegarde
+    read -p "Entrez la fréquence de sauvegarde (par exemple, '0 0 * * *' pour chaque jour à minuit) : " frequency
+
+    # Obtenir le chemin absolu du script
+    script_path=$(realpath "$0")
+
+    # Ajouter la tâche cron pour planifier la sauvegarde
+    echo "$frequency $script_path sauvegarde_immediate" | crontab -
+
+    echo "La sauvegarde est planifiée avec succès pour la fréquence : $frequency."
+    echo "Assurez-vous que le script est exécutable et que les répertoires spécifiés sont valides."
+}
+
+# Choix de sauvegarde (immédiate ou programmée)
+choix=""
+while [[ "$choix" != "I" && "$choix" != "P" ]]; do
+    read -p "Voulez-vous effectuer une sauvegarde immédiate (I) ou programmée (P) ? : " choix
+    choix=$(echo "$choix" | tr '[:lower:]' '[:upper:]')  # Convertir en majuscules pour la comparaison
+    if [[ "$choix" != "I" && "$choix" != "P" ]]; then
+        echo "Choix invalide. Veuillez saisir 'I' pour une sauvegarde immédiate ou 'P' pour une sauvegarde programmée."
+    fi
+done
+
+case $choix in
+    "I")
+        # Demander à l'utilisateur les répertoires ou fichiers à sauvegarder
+        read -p "Veuillez entrer les répertoires ou fichiers à sauvegarder (séparés par un espace) : " -a sources
+        verifier_repertoire_src "${sources[@]}"
+        if [ $? -ne 0 ]; then
+            exit 1
+        fi
+        ;;
+    "P")
+        planifier_sauvegarde_cron
+        ;;
+esac
+
+# Informer sur le fichier de configuration
+echo -e "\e[1m\e[91mUn fichier de configuration est mis à votre disposition pour personnaliser votre sauvegarde."
+echo "Vous pouvez modifier les répertoires de destination et source, ainsi que la fréquence de sauvegarde."
+echo "Pour accéder au fichier de configuration, veuillez consulter backup_config.json.\e[0m"
+
+# Demander à l'utilisateur de choisir le type de compression
+read -p "Choisissez le type de compression qui vous convient (1 pour ZIP, 2 pour TAR, 3 pour RAR) : " compression_choice
+case $compression_choice in
+    1)
+        compression="zip"
+        ;;
+    2)
+        compression="tar"
+        ;;
+    3)
+        compression="rar"
+        ;;
+    *)
+        echo "Choix de compression invalide. Veuillez saisir 1, 2 ou 3."
+        exit 1
+        ;;
+esac
+
+# Demander à l'utilisateur les répertoires ou fichiers à exclure de la sauvegarde
+read -p "Veuillez entrer les répertoires ou fichiers à exclure de la sauvegarde (laissez vide si aucun) : " excluded
+
+# Afficher le type de compression choisi et les fichiers/dossiers à exclure
+echo "Type de compression choisi : $compression"
+echo "Fichiers/dossiers à exclure : $excluded"
+
+# Effectuer la sauvegarde dans le répertoire de destination en utilisant le type de compression spécifié
+case $compression in
+    "zip")
+        echo "Compression avec ZIP..."
+        zip -r "$destination/sauvegarde.zip" "${sources[@]}" $excluded
+        ;;
+    "tar")
+        echo "Compression avec TAR..."
+        tar -czf "$destination/sauvegarde.tar.gz" "${sources[@]}" $excluded
+        ;;
+    "rar")
+        echo "Compression avec RAR..."
+        rar a "$destination/sauvegarde.rar" "${sources[@]}" $excluded
+        ;;
+    *)
+        echo "Type de compression non valide."
+        exit 1
+        ;;
+esac
+
+echo "Sauvegarde terminée !"

@@ -161,4 +161,4 @@ case $type_compression in
 esac
 
 echo "Sauvegarde terminée !"
-
+git push origin main

@@ -1,120 +1,164 @@
 #!/bin/bash
 
-# Define variables
-backup_dir=".backup"
-backup_config="backup_config.json"
+# Définir les chemins des fichiers de configuration et de journal
+config_file="backup_config.json"
+log_file="backup_log.json"
 
-# Function to initialize the backup directory and create/update the configuration file
-initialize_backup_dir() {
-    mkdir -p "$backup_dir"
-    echo "Répertoire de sauvegarde initialisé."
+# Affichage du répertoire courant et liste des fichiers et dossiers
+echo "Actuellement vous êtes dans le répertoire : $(pwd)"
+echo "Liste des fichiers et dossiers :"
+ls
 
-    # Check if the configuration file exists
-    if [ ! -f "$backup_dir/$backup_config" ]; then
-        # If the configuration file doesn't exist, prompt user to provide project name and preferred compression
-        read -p "Nom du projet : " project_name
-        read -p "Type de compression préféré (zip, tar, rar) : " preferred_compression
-        
-        # Create initial configuration
-        config='{
-    "project_name": "'$project_name'",
-    "preferred_compression": "'$preferred_compression'",
-    "saved_files": [],
-    "logs": {}
-}'
-        echo "$config" > "$backup_dir/$backup_config"
-        echo "Fichier de configuration créé."
+read -p "Voulez-vous changer de répertoire ? (oui/non) " changer_repertoire
+if [ "$changer_repertoire" = "oui" ]; then
+    read -p "Veuillez entrer le chemin complet du répertoire : " nouveau_repertoire
+    if cd "$nouveau_repertoire" 2>/dev/null; then
+        echo "Changement de répertoire vers $nouveau_repertoire"
     else
-        echo "Le répertoire de sauvegarde est déjà initialisé."
+        echo "Le chemin $nouveau_repertoire est invalide."
     fi
-}
+fi
 
-# Function to perform immediate backup
-perform_immediate_backup() {
-    echo "Sauvegarde immédiate en cours..."
-    destination="$backup_dir"
-    mkdir -p "$destination"
-    cp -r "${@:2}" "$destination"
-    echo "Sauvegarde immédiate terminée."
+planifier_sauvegarde_cron() {
+    echo "Sauvegarde programmée avec cron."
 
-    # Update configuration file with saved files
-    jq --argjson new_files '["'${@:2}'"]' \
-    '.saved_files += $new_files' "$backup_dir/$backup_config" > "$backup_dir/tmp.json" && mv "$backup_dir/tmp.json" "$backup_dir/$backup_config"
-    
-    # Log the time of each saved file
-    for file in "${@:2}"; do
-        timestamp=$(date +"%Y-%m-%d %H:%M:%S")
-        jq --arg time "$timestamp" \
-        --arg file "$file" \
-        '.logs[$file] = $time' "$backup_dir/$backup_config" > "$backup_dir/tmp.json" && mv "$backup_dir/tmp.json" "$backup_dir/$backup_config"
-    done
+    # Demander à l'utilisateur la fréquence de la sauvegarde
+    read -p "Entrez la fréquence de sauvegarde (par exemple, '0 0 * * *' pour chaque jour à minuit) : " frequency
 
-    echo "Sauvegarde enregistrée dans le fichier de configuration."
-}
-
-# Function to schedule backup
-schedule_backup() {
-    echo "Sauvegarde planifiée."
-    frequency="$1"
+    # Obtenir le chemin absolu du script
     script_path=$(realpath "$0")
+
+    # Ajouter la tâche cron pour planifier la sauvegarde
     echo "$frequency $script_path sauvegarde_immediate" | crontab -
-    echo "Sauvegarde planifiée avec succès pour la fréquence : $frequency."
+
+    echo "La sauvegarde est planifiée avec succès pour la fréquence : $frequency."
+    echo "Assurez-vous que le script est exécutable et que les répertoires spécifiés sont valides."
 }
 
-# Function to restore files and folders to the initial directory
-restore_files() {
-    echo "Restauration des fichiers et dossiers..."
 
-    for file in "${@:2}"; do
-        if [ -e "$backup_dir/$file" ]; then
-            cp -r "$backup_dir/$file" .
-            echo "$file restauré avec succès."
-        else
-            echo "$file n'existe pas dans la sauvegarde."
+
+# Demander au utilisateur les répertoires sources (séparés par un espace) et le répertoire de destination
+read -p "Veuillez entrer les répertoires à sauvegarder séparés par un espace : " repertoire_sources
+read -p "Veuillez entrer le répertoire de destination : " repertoire_destination
+
+# Vérifier et créer le répertoire de destination si nécessaire
+verifier_repertoire_dest() {
+    dest="$1"
+    if [ ! -d "$dest" ]; then
+        read -p "Le répertoire de destination '$dest' n'existe pas. Voulez-vous le créer ? (o/n) : " choix
+        case "$choix" in
+            [oO]|[oO][uU][iI])
+                mkdir -p "$dest" && return 0  # Crée le répertoire s'il n'existe pas
+                ;;
+            *)
+                return 1  # Indique que le répertoire n'a pas été créé
+                ;;
+        esac
+    fi
+    return 0  # Le répertoire existe déjà
+}
+
+# Vérifier et créer le répertoire de destination si nécessaire
+if ! verifier_repertoire_dest "$repertoire_destination"; then
+    echo "Opération annulée."
+    exit 1
+fi
+
+# Choix de sauvegarde (immédiate ou programmée)
+choix=""
+while [[ "$choix" != "I" && "$choix" != "P" ]]; do
+    read -p "Voulez-vous effectuer une sauvegarde immédiate (I) ou programmée (P) ? : " choix
+    choix=$(echo "$choix" | tr '[:lower:]' '[:upper:]')  # Convertir en majuscules pour la comparaison
+    if [[ "$choix" != "I" && "$choix" != "P" ]]; then
+        echo "Choix invalide. Veuillez saisir 'I' pour une sauvegarde immédiate ou 'P' pour une sauvegarde programmée."
+    fi
+done
+
+case $choix in
+    "I")
+        # Demander à l'utilisateur les répertoires ou fichiers à sauvegarder
+        read -p "Veuillez entrer les répertoires ou fichiers à sauvegarder (séparés par un espace) : " -a sources
+        verifier_repertoire_src "${sources[@]}"
+        if [ $? -ne 0 ]; then
+            exit 1
         fi
-    done
+        ;;
+    "P")
+        planifier_sauvegarde_cron
+        ;;
+esac
+# Demander à l'utilisateur s'il souhaite utiliser un fichier de configuration
+read -p "Voulez-vous utiliser un fichier de configuration ? (oui/non) " utiliser_configuration
+if [ "$utiliser_configuration" = "oui" ]; then
+    read -p "Veuillez entrer le nom du fichier de configuration : " fichier_configuration
+    # Vérifier si le fichier de configuration existe
+    if [ -f "$fichier_configuration" ]; then
+        # Charger les informations du fichier de configuration
+        source "$fichier_configuration"
+        echo "Informations chargées depuis le fichier de configuration."
+    else
+        echo "Le fichier de configuration '$fichier_configuration' n'existe pas."
+    fi
+fi
 
-    echo "Restauration terminée."
-}
+# Afficher les avantages de chaque type de compression
+echo "Voici les avantages de chaque type de compression :"
+echo "1. ZIP : Format de compression standard avec une large compatibilité et la possibilité d'ajouter des commentaires aux archives."
+echo "2. GZIP : Compression rapide avec une bonne réduction de taille, souvent utilisée pour compresser des fichiers individuels."
+echo "3. TAR : Permet de regrouper plusieurs fichiers et répertoires en un seul fichier, souvent utilisé en combinaison avec d'autres algorithmes de compression comme GZIP."
 
-# Function to display the help message
-display_help() {
-    echo "Utilisation : ./backupapp [options]"
-    echo "Options :"
-    echo "  -s [fichiers/répertoires]   Effectuer une sauvegarde immédiate"
-    echo "  init                        Initialiser le répertoire de sauvegarde"
-    echo "  -p [fréquence]              Planifier une sauvegarde en utilisant la syntaxe cron"
-    echo "  -b [fichiers/répertoires]   Restaurer des fichiers et dossiers"
-    echo "  -h, --help                  Afficher ce message d'aide"
-}
-
-# Main function
-main() {
-    case $1 in
-        "-s")
-            if [ "$2" == "." ]; then
-                perform_immediate_backup "$backup_dir" *
-            else
-                perform_immediate_backup "$backup_dir" "${@:2}"
-            fi
+# Demander à l'utilisateur de choisir le type de compression
+while true; do
+    read -p "Veuillez choisir le type de compression (1 pour ZIP, 2 pour GZIP, 3 pour TAR) : " choix_compression
+    case $choix_compression in
+        1)
+            type_compression="ZIP"
+            break
             ;;
-        "init")
-            initialize_backup_dir
+        2)
+            type_compression="GZIP"
+            break
             ;;
-        "-p")
-            schedule_backup "$2"
-            ;;
-        "-b")
-            restore_files "${@:2}"
-            ;;
-        "-h" | "--help")
-            display_help
+        3)
+            type_compression="TAR"
+            break
             ;;
         *)
-            echo "Erreur : Option invalide. Utilisez '-h' ou '--help' pour obtenir des instructions d'utilisation."
+            echo "Choix invalide. Veuillez choisir un numéro entre 1 et 3."
             ;;
     esac
-}
+done
 
-# Exécuter la fonction principale avec les paramètres de ligne de commande
-main "$@"
+# Demander à l'utilisateur les répertoires ou fichiers à exclure de la sauvegarde
+read -p "Veuillez entrer les répertoires ou fichiers à exclure de la sauvegarde (laissez vide si aucun) : " excluded
+
+# Afficher le type de compression choisi et les fichiers/dossiers à exclure
+echo "Type de compression choisi : $type_compression"
+echo "Fichiers/dossiers à exclure : $excluded"
+
+# Déclaration des variables sources et destination pour la commande de compression
+sources=($repertoire_sources)
+destination="$repertoire_destination"
+
+# Effectuer la sauvegarde dans le répertoire de destination en utilisant le type de compression spécifié
+case $type_compression in
+    "ZIP")
+        echo "Compression avec ZIP..."
+        zip -r "$destination/sauvegarde.zip" "${sources[@]}" $excluded
+        ;;
+    "TAR")
+        echo "Compression avec TAR..."
+        tar -czf "$destination/sauvegarde.tar.gz" "${sources[@]}" $excluded
+        ;;
+    "GZIP")
+        echo "Compression avec GZIP..."
+        gzip -r "${sources[@]}" $excluded
+        ;;
+    *)
+        echo "Type de compression non valide."
+        exit 1
+        ;;
+esac
+
+echo "Sauvegarde terminée !"
+
